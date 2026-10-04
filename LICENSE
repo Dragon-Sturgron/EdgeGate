@@ -1,0 +1,10 @@
+EdgeGate is intended to be distributed under GPL-2.0-only because its deployment
+process incorporates GPL-licensed upstream components.
+
+Upstream projects retain their respective copyright notices and licenses:
+
+- cmliu/edgetunnel
+- lsh8848/cm-Workers-CheckSocks5
+
+GNU GPL v2:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt

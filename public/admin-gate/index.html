@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EdgeGate · VPN Gate</title>
+  <style>
+    :root{--bg:#0b1220;--panel:#101a2c;--line:#263550;--text:#e8eefc;--muted:#8ea2c6;--blue:#4d86ff;--green:#34d399;--red:#fb7185}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1180px;margin:28px auto;padding:0 18px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:18px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}h1,h2{margin:0 0 12px}.muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.stat{padding:14px;border:1px solid var(--line);border-radius:10px}.stat b{display:block;font-size:26px;margin-top:4px}
+    label{display:block;margin:10px 0 5px;color:var(--muted)}input,textarea{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:#0d1728;color:var(--text)}
+    button{border:0;border-radius:8px;padding:9px 13px;background:var(--blue);color:#fff;cursor:pointer}button.secondary{background:#25344f}table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:9px;border-top:1px solid var(--line);text-align:left}.bad{color:var(--red)}.login{max-width:420px;margin:100px auto}.hidden{display:none}.row{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    @media(max-width:700px){.row{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div id="loginView" class="wrap login">
+  <div class="panel">
+    <h1>EdgeGate</h1>
+    <p class="muted">使用 Cloudflare 环境变量 ADMIN 登录 VPN Gate 管理页面。</p>
+    <label>管理员密码</label>
+    <input id="password" type="password">
+    <div style="margin-top:12px"><button id="loginBtn">登录</button></div>
+    <p id="loginError" class="bad"></p>
+  </div>
+</div>
+
+<div id="appView" class="wrap hidden">
+  <div class="top">
+    <div>
+      <h1>VPN Gate 管理</h1>
+      <div class="muted">EdgeGate 0.1 · 住宅/机房属于出口 ASN 与 hosting 标志的估算。</div>
+    </div>
+    <div>
+      <button class="secondary" onclick="location.href='/admin'">EdgeTunnel 后台</button>
+      <button class="secondary" id="logoutBtn">退出</button>
+    </div>
+  </div>
+
+  <div class="panel"><div class="grid" id="stats"></div></div>
+
+  <div class="panel">
+    <h2>设置</h2>
+    <div class="row">
+      <div><label>每轮检测数量</label><input id="batchSize" type="number" min="1" max="50"></div>
+      <div><label>检测并发（最大 5）</label><input id="concurrency" type="number" min="1" max="5"></div>
+      <div><label>最大延迟 ms</label><input id="maxLatencyMs" type="number"></div>
+      <div><label>连续失败多少次移除</label><input id="removeAfterFailures" type="number"></div>
+      <div><label>节点最大保留时间（分钟）</label><input id="staleAfterMinutes" type="number"></div>
+      <div><label>最大候选节点数</label><input id="maxCandidates" type="number"></div>
+    </div>
+    <label>国家代码（逗号分隔；留空=全部，例如 JP,US,KR）</label>
+    <input id="countries">
+    <label>Cloudflare 优选入口（每行一个，可写 domain:443；留空则使用当前域名）</label>
+    <textarea id="edgeHosts" rows="4"></textarea>
+    <div style="margin-top:12px">
+      <label><input id="enabled" type="checkbox" style="width:auto"> 开启 Cron 自动刷新</label>
+      <label><input id="residentialFirst" type="checkbox" style="width:auto"> 住宅类型优先排序</label>
+      <label><input id="includeDatacenter" type="checkbox" style="width:auto"> 保留机房节点</label>
+      <label><input id="includeUnknown" type="checkbox" style="width:auto"> 保留未知类型</label>
+    </div>
+    <div style="margin-top:14px">
+      <button id="saveBtn">保存设置</button>
+      <button id="refreshBtn" class="secondary">立即检测一轮</button>
+      <a href="/gate/nodes.txt" target="_blank" style="color:#8ab4ff;margin-left:10px">查看 nodes.txt</a>
+    </div>
+    <p id="actionMsg" class="muted"></p>
+  </div>
+
+  <div class="panel">
+    <h2>当前健康节点</h2>
+    <div style="overflow:auto"><table>
+      <thead><tr><th>国家</th><th>类型</th><th>Host:Port</th><th>延迟</th><th>出口 IP</th><th>ISP/ASN</th><th>检测时间</th></tr></thead>
+      <tbody id="nodes"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});let data=null;try{data=await r.json()}catch{}if(!r.ok){const e=new Error(data?.error||`HTTP ${r.status}`);e.status=r.status;throw e}return data}
+async function login(){$("loginError").textContent="";try{await api("/api/gate/login",{method:"POST",body:JSON.stringify({password:$("password").value})});await boot()}catch(e){$("loginError").textContent=e.message}}
+function fillSettings(s){$("batchSize").value=s.batchSize;$("concurrency").value=s.concurrency;$("maxLatencyMs").value=s.maxLatencyMs;$("removeAfterFailures").value=s.removeAfterFailures;$("staleAfterMinutes").value=s.staleAfterMinutes;$("maxCandidates").value=s.maxCandidates;$("countries").value=(s.countries||[]).join(",");$("edgeHosts").value=(s.edgeHosts||[]).join("\n");$("enabled").checked=!!s.enabled;$("residentialFirst").checked=!!s.residentialFirst;$("includeDatacenter").checked=!!s.includeDatacenter;$("includeUnknown").checked=!!s.includeUnknown}
+function readSettings(){return{batchSize:Number($("batchSize").value),concurrency:Number($("concurrency").value),maxLatencyMs:Number($("maxLatencyMs").value),removeAfterFailures:Number($("removeAfterFailures").value),staleAfterMinutes:Number($("staleAfterMinutes").value),maxCandidates:Number($("maxCandidates").value),countries:$("countries").value.split(",").map(x=>x.trim()).filter(Boolean),edgeHosts:$("edgeHosts").value.split(/\r?\n|,/).map(x=>x.trim()).filter(Boolean),enabled:$("enabled").checked,residentialFirst:$("residentialFirst").checked,includeDatacenter:$("includeDatacenter").checked,includeUnknown:$("includeUnknown").checked}}
+function render(state){const s=state.stats||{};const items=[["最后运行",state.lastRun||"-"],["候选",s.candidates??state.candidateCount??0],["本轮检测",s.checkedThisRun??0],["本轮成功",s.successThisRun??0],["健康节点",s.active??state.active?.length??0],["住宅估算",s.residential??0],["机房",s.datacenter??0],["未知",s.unknown??0]];$("stats").innerHTML=items.map(([k,v])=>`<div class="stat"><span class="muted">${k}</span><b>${String(v)}</b></div>`).join("");fillSettings(state.settings);$("nodes").innerHTML=(state.active||[]).map(n=>{const org=n.exit?.asn?.org||n.exit?.asn?.name||n.exit?.org||"";return `<tr><td>${n.countryCode||n.country||"-"}</td><td>${n.networkType||"unknown"}</td><td>${n.host}:${n.port}</td><td>${n.latencyMs??"-"} ms</td><td>${n.exit?.ip||"-"}</td><td>${org||"-"}</td><td>${n.checkedAt||"-"}</td></tr>`}).join("")}
+async function loadState(){render(await api("/api/gate/state"))}
+async function boot(){try{const state=await api("/api/gate/state");$("loginView").classList.add("hidden");$("appView").classList.remove("hidden");render(state)}catch(e){$("appView").classList.add("hidden");$("loginView").classList.remove("hidden")}}
+$("loginBtn").onclick=login;$("password").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
+$("saveBtn").onclick=async()=>{$("actionMsg").textContent="保存中...";try{fillSettings(await api("/api/gate/settings",{method:"PUT",body:JSON.stringify(readSettings())}));$("actionMsg").textContent="设置已保存。"}catch(e){$("actionMsg").textContent="保存失败："+e.message}};
+$("refreshBtn").onclick=async()=>{$("actionMsg").textContent="正在检测，本轮会连接一批 SSTP 节点...";$("refreshBtn").disabled=true;try{const result=await api("/api/gate/refresh",{method:"POST",body:"{}"});$("actionMsg").textContent=`完成：成功 ${result.stats?.successThisRun??0} / 检测 ${result.stats?.checkedThisRun??0}`;await loadState()}catch(e){$("actionMsg").textContent="检测失败："+e.message}finally{$("refreshBtn").disabled=false}};
+$("logoutBtn").onclick=async()=>{await api("/api/gate/logout",{method:"POST",body:"{}"});location.reload()};boot();
+</script>
+</body></html>

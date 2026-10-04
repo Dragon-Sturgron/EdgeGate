@@ -1,0 +1,16 @@
+{
+  "name": "edgegate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EdgeTunnel + VPN Gate SSTP checker, all-in-one Cloudflare Worker",
+  "type": "module",
+  "scripts": {
+    "sync:upstreams": "node scripts/sync-upstreams.mjs",
+    "dev": "npm run sync:upstreams && wrangler dev",
+    "deploy": "npm run sync:upstreams && wrangler deploy",
+    "build": "npm run sync:upstreams"
+  },
+  "devDependencies": {
+    "wrangler": "^4.102.0"
+  }
+}
